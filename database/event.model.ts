@@ -199,8 +199,14 @@ function normalizeTime(time: string): string {
   // Handle 24-hour format (e.g., "14:30")
   const twentyFourHourMatch = time.match(/^(\d{1,2}):(\d{2})$/);
   if (twentyFourHourMatch) {
-    const hours = String(parseInt(twentyFourHourMatch[1], 10)).padStart(2, '0');
-    return `${hours}:${twentyFourHourMatch[2]}`;
+    const hours = parseInt(twentyFourHourMatch[1], 10);
+    const minutes = parseInt(twentyFourHourMatch[2], 10);
+    
+    if (hours > 23 || minutes > 59) {
+      throw new Error(`Invalid time format: "${time}". Hours must be 0-23, minutes 0-59.`);
+    }
+    
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   }
 
   throw new Error(`Invalid time format: "${time}". Expected HH:MM or H:MM AM/PM.`);
