@@ -149,8 +149,9 @@ function normalizeTime(time: string): string {
   throw new Error(`Invalid time format: "${time}". Expected HH:MM or H:MM AM/PM.`);
 }
 
-// Pre-save hook: handles slug generation, date normalization, and time normalization
-EventSchema.pre<IEvent>('save', function (next) {
+// Pre-save hook: handles slug generation, date normalization, and time normalization.
+// Mongoose 9 uses async/await middleware — throw to abort, no next() callback needed.
+EventSchema.pre<IEvent>('save', async function () {
   // Only regenerate slug if title has been modified (avoids unnecessary updates)
   if (this.isModified('title')) {
     this.slug = generateSlug(this.title);
@@ -160,22 +161,23 @@ EventSchema.pre<IEvent>('save', function (next) {
   if (this.isModified('date')) {
     const parsed = new Date(this.date);
     if (isNaN(parsed.getTime())) {
-      return next(new Error(`Invalid date format: "${this.date}"`));
+      throw new Error(`Invalid date format: "${this.date}"`);
     }
     this.date = parsed.toISOString().split('T')[0];
   }
 
-  // Normalize time to HH:MM (24-hour) format if modified
+  // Normalize time to HH:MM (24-hour) format if modified.
+  // normalizeTime() throws on invalid input, which aborts the save automatically.
   if (this.isModified('time')) {
-    try {
-      this.time = normalizeTime(this.time);
-    } catch (err) {
-      return next(err as Error);
-    }
+    this.time = normalizeTime(this.time);
   }
-
-  next();
 });
+
+// Create unique index on slug for better performance
+EventSchema.index({ slug: 1 }, { unique: true });
+
+// Create compound index for common queries
+EventSchema.index({ date: 1, mode: 1 });
 
 // Use existing model in hot-reload environments (Next.js dev mode) or create a new one
 const Event: Model<IEvent> =
