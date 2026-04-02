@@ -1,13 +1,8 @@
 import mongoose from 'mongoose';
 
-// Define the MongoDB connection URI from environment variables
+// Read the MongoDB connection URI — validation is deferred to connectDB()
+// so importing this module never throws at build time or in tests.
 const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error(
-    'Please define the MONGODB_URI environment variable inside .env.local'
-  );
-}
 
 /**
  * Global is used here to maintain a cached connection across hot reloads
@@ -40,13 +35,21 @@ async function connectDB(): Promise<typeof mongoose> {
     return cached.conn;
   }
 
+  // Validate here, not at module level, so the error only surfaces when a
+  // connection is actually attempted (safe for builds, tests, and imports).
+  if (!MONGODB_URI) {
+    throw new Error(
+      'Please define the MONGODB_URI environment variable inside .env.local'
+    );
+  }
+
   // Create new connection if no promise exists
   if (!cached.promise) {
     const opts = {
       bufferCommands: false, // Disable mongoose buffering
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI as string, opts);
+    cached.promise = mongoose.connect(MONGODB_URI, opts);
   }
 
   try {
