@@ -1,5 +1,9 @@
 import mongoose from 'mongoose';
 
+import { setServers } from "node:dns/promises";
+
+setServers(["1.1.1.1", "8.8.8.8"]);
+
 // Read the MongoDB connection URI — validation is deferred to connectDB()
 // so importing this module never throws at build time or in tests.
 const MONGODB_URI = process.env.MONGODB_URI;
