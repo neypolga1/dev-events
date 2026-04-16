@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
 // TypeScript interface representing a single Event document
@@ -110,15 +111,71 @@ const EventSchema = new Schema<IEvent>(
 );
 
 /**
- * Generates a URL-friendly slug from a string:
- * lowercases, trims, replaces spaces with hyphens, removes non-alphanumeric chars.
+ * Generates a URL-friendly slug from a string.
+ *
+ * Step 1 – NFD normalization: decomposes accented characters into base letter +
+ * combining mark (e.g. é → e + \u0301), then strips the marks. This preserves
+ * the readable base letters for most European scripts.
+ *
+ * Step 2 – Fallback: titles that are entirely non-ASCII after normalization
+ * (e.g. Arabic, CJK) would produce an empty string. Instead, derive a
+ * deterministic 12-char SHA-256 prefix from the original title so the slug is
+ * always non-empty, URL-safe, and collision-resistant.
  */
 function generateSlug(title: string): string {
-  return title
+  const slug = title
+    .normalize('NFD')                  // decompose accented glyphs
+    .replace(/[\u0300-\u036f]/g, '')   // strip combining diacritical marks
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '');
+    .replace(/\s+/g, '-')              // spaces → hyphens
+    .replace(/[^a-z0-9-]/g, '')        // drop all remaining non-ASCII chars
+    .replace(/-+/g, '-')               // collapse consecutive hyphens
+    .replace(/^-|-$/g, '');            // trim leading / trailing hyphens
+
+  if (slug) return slug;
+
+  // Deterministic fallback: short SHA-256 hash of the original title
+  const hash = createHash('sha256').update(title).digest('hex').slice(0, 12);
+  return `event-${hash}`;
+}
+
+/**
+ * Normalizes a date string to YYYY-MM-DD without timezone shifts.
+ *
+ * ISO YYYY-MM-DD inputs are validated and returned directly — no Date object
+ * involved — to avoid the UTC-vs-local shift that new Date() + toISOString()
+ * introduces in UTC+ timezones (e.g. "2024-12-31" → "2024-12-30" at UTC+5).
+ *
+ * Other recognisable formats (e.g. "December 31, 2024") are parsed via the
+ * Date constructor and reconstructed with LOCAL-time getters so the calendar
+ * date always matches what was supplied.
+ */
+function normalizeDate(input: string): string {
+  // Fast path: already YYYY-MM-DD — validate components and return as-is
+  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const month = parseInt(isoMatch[2], 10);
+    const day   = parseInt(isoMatch[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      throw new Error(`Invalid date: "${input}"`);
+    }
+    return input;
+  }
+
+  // Other formats: parse then reconstruct using LOCAL getters (not UTC)
+  // so the calendar date is preserved regardless of server timezone
+  const parsed = new Date(input);
+  if (isNaN(parsed.getTime())) {
+    throw new Error(
+      `Invalid date format: "${input}". Expected YYYY-MM-DD or a recognisable date string.`
+    );
+  }
+
+  const year  = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day   = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -163,13 +220,10 @@ EventSchema.pre<IEvent>('save', async function () {
     this.slug = generateSlug(this.title);
   }
 
-  // Normalize date to ISO format (YYYY-MM-DD) if modified
+  // Normalize date to YYYY-MM-DD if modified.
+  // normalizeDate() avoids timezone shifts by never calling toISOString().
   if (this.isModified('date')) {
-    const parsed = new Date(this.date);
-    if (isNaN(parsed.getTime())) {
-      throw new Error(`Invalid date format: "${this.date}"`);
-    }
-    this.date = parsed.toISOString().split('T')[0];
+    this.date = normalizeDate(this.date);
   }
 
   // Normalize time to HH:MM (24-hour) format if modified.

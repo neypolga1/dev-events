@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
+import Event from './event.model';
 
 // TypeScript interface representing a single Booking document
 export interface IBooking extends Document {
@@ -35,21 +36,17 @@ const BookingSchema = new Schema<IBooking>(
   }
 );
 
-// Pre-save hook: verifies that the referenced Event exists before saving
-BookingSchema.pre<IBooking>('save', async function (next) {
+// Pre-save hook: verifies the referenced Event exists before saving.
+// Uses explicit Event import so a missing/unloaded model surfaces as a clear import error.
+// Mongoose 9 async middleware — throw to abort, no next() callback needed.
+BookingSchema.pre<IBooking>('save', async function () {
   if (this.isModified('eventId')) {
-    const eventExists = await mongoose.models.Event?.exists({
-      _id: this.eventId,
-    });
+    const eventExists = await Event.exists({ _id: this.eventId });
 
     if (!eventExists) {
-      return next(
-        new Error(`Event with ID "${this.eventId}" does not exist.`)
-      );
+      throw new Error(`Event with ID "${this.eventId}" does not exist.`);
     }
   }
-
-  next();
 });
 
 // Create index on eventId for faster queries
